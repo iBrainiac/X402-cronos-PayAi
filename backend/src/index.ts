@@ -1,0 +1,247 @@
+import express, { Request, Response, NextFunction } from "express";
+import { verifyPaymentHeader, settlePayment } from "./lib/facilitator";
+import { ENV } from "./config/env";
+import { SERVICES } from "./config/services";
+
+const app = express();
+app.use(express.json());
+
+// CORS middleware for frontend
+app.use((req: Request, res: Response, next: NextFunction) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type, X-PAYMENT");
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
+
+// Request logging middleware (for debugging)
+app.use((req: Request, res: Response, next: NextFunction) => {
+  if (req.path === "/api/agent/chat") {
+    console.log(`\n🔵 ${req.method} ${req.path} - ${new Date().toISOString()}`);
+  }
+  next();
+});
+
+const SERVICE = SERVICES.AI_AGENT_ACCESS;
+
+// Get USDC.e contract address based on network
+const getUSDCEAddress = () => {
+  return ENV.NETWORK === "cronos" 
+    ? ENV.USDCE_CONTRACT_MAINNET 
+    : ENV.USDCE_CONTRACT_TESTNET;
+};
+
+/**
+ * GET /api/agent/run
+ * 
+ * Protected endpoint that requires payment via Cronos X402 Facilitator.
+ * 
+ * Flow (per X402 Facilitator spec):
+ * 1. First request → Returns 402 Payment Required with payment requirements
+ * 2. Client signs EIP-3009 authorization and sends X-PAYMENT header
+ * 3. Backend verifies payment header with facilitator
+ * 4. Backend settles payment on-chain via facilitator
+ * 5. Access granted → Returns protected resource
+ */
+app.get("/api/agent/run", async (req: Request, res: Response) => {
+  const paymentHeader = req.headers["x-payment"] as string | undefined;
+
+  // Step 1: Payment Required (402) - Return payment requirements
+  if (!paymentHeader) {
+    const paymentRequirements = {
+      scheme: "exact" as const,
+      network: ENV.NETWORK as "cronos-testnet" | "cronos",
+      payTo: ENV.SELLER_WALLET,
+      asset: getUSDCEAddress(),
+      description: SERVICE.description,
+      mimeType: SERVICE.mimeType,
+      maxAmountRequired: SERVICE.priceUSDC,
+      maxTimeoutSeconds: SERVICE.maxTimeoutSeconds,
+    };
+
+    return res.status(402).json({
+      error: "Payment Required",
+      x402Version: 1,
+      paymentRequirements,
+    });
+  }
+
+  // Step 2: Verify payment header
+  const paymentRequirements = {
+    scheme: "exact" as const,
+    network: ENV.NETWORK as "cronos-testnet" | "cronos",
+    payTo: ENV.SELLER_WALLET,
+    asset: getUSDCEAddress(),
+    description: SERVICE.description,
+    mimeType: SERVICE.mimeType,
+    maxAmountRequired: SERVICE.priceUSDC,
+    maxTimeoutSeconds: SERVICE.maxTimeoutSeconds,
+  };
+
+  const verifyResult = await verifyPaymentHeader(paymentHeader, paymentRequirements);
+  
+  if (!verifyResult.isValid) {
+    return res.status(402).json({
+      error: "Invalid payment",
+      invalidReason: verifyResult.invalidReason,
+    });
+  }
+
+  // Step 3: Settle payment on-chain
+  const settleResult = await settlePayment(paymentHeader, paymentRequirements);
+  
+  if (settleResult.event !== "payment.settled") {
+    return res.status(402).json({
+      error: "Payment settlement failed",
+      reason: settleResult.error,
+    });
+  }
+
+  // Step 4: Access Granted - Execute Crypto Price Feed Agent
+  try {
+    // Fetch crypto prices from CoinGecko (free, no API key required)
+    const symbols = req.query.symbols as string | undefined;
+    const coins = symbols ? symbols.split(',').map(s => s.trim().toLowerCase()) : ['bitcoin', 'ethereum'];
+    
+    // Limit to 5 coins max for simplicity
+    const limitedCoins = coins.slice(0, 5).join(',');
+    
+    const response = await fetch(
+      `https://api.coingecko.com/api/v3/simple/price?ids=${limitedCoins}&vs_currencies=usd&include_24hr_change=true`
+    );
+    
+    if (!response.ok) {
+      throw new Error('Failed to fetch prices');
+    }
+    
+    const priceData = await response.json() as Record<string, { usd: number; usd_24h_change?: number }>;
+    
+    // Format the response
+    const formattedPrices = Object.entries(priceData).map(([id, data]) => ({
+      symbol: id.charAt(0).toUpperCase() + id.slice(1),
+      price: data.usd,
+      change24h: data.usd_24h_change ? data.usd_24h_change.toFixed(2) : null,
+    }));
+    
+    // Return protected resource with payment details (per X402 spec)
+    res.status(200).json({
+      data: {
+        prices: formattedPrices,
+        timestamp: new Date().toISOString(),
+        requestId: `req_${Date.now()}`,
+      },
+      payment: {
+        txHash: settleResult.txHash,
+        from: settleResult.from,
+        to: settleResult.to,
+        value: settleResult.value,
+        blockNumber: settleResult.blockNumber,
+        timestamp: settleResult.timestamp,
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: "agent_execution_failed",
+      message: error.message || "Failed to fetch crypto prices",
+    });
+  }
+});
+
+// Agent chat endpoint (for interactive agent after payment)
+app.post("/api/agent/chat", async (req: Request, res: Response) => {
+  console.log("📨 Received chat request:", req.body);
+  const { message } = req.body;
+  
+  if (!message) {
+    console.error("❌ No message provided");
+    return res.status(400).json({ error: "Message is required" });
+  }
+  
+  // Check if API key is configured
+  const apiKey = process.env.OPENAI_API_KEY;
+  console.log("🔑 API Key present:", !!apiKey, apiKey ? `${apiKey.substring(0, 7)}...` : "NOT SET");
+  
+  if (!apiKey) {
+    console.error("❌ OPENAI_API_KEY is not set in environment variables");
+    return res.status(500).json({
+      error: "agent_chat_failed",
+      message: "OpenAI API key is not configured. Please add OPENAI_API_KEY to your .env file.",
+    });
+  }
+  
+  try {
+    console.log("🚀 Calling OpenAI API with message:", message.substring(0, 50) + "...");
+    
+    // OpenAI integration
+    const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: 'gpt-4',
+        messages: [
+          { role: 'system', content: 'You are a helpful assistant.' },
+          { role: 'user', content: message }
+        ],
+      })
+    });
+    
+    console.log("📡 OpenAI response status:", openaiResponse.status);
+    
+    if (!openaiResponse.ok) {
+      const errorData = await openaiResponse.json().catch(() => ({}));
+      console.error("❌ OpenAI API error:", openaiResponse.status, JSON.stringify(errorData));
+      throw new Error(`OpenAI API error: ${openaiResponse.status} - ${JSON.stringify(errorData)}`);
+    }
+    
+    const data = await openaiResponse.json() as {
+      choices: Array<{
+        message: {
+          content: string;
+        };
+      }>;
+    };
+    
+    if (!data.choices || data.choices.length === 0) {
+      console.error("❌ No choices in OpenAI response:", JSON.stringify(data));
+      throw new Error("No response from OpenAI API");
+    }
+    
+    const agentResponse = data.choices[0].message.content;
+    console.log("✅ OpenAI response received, choices:", data.choices.length);
+    console.log("💬 Sending response to frontend:", agentResponse.substring(0, 100) + "...");
+    
+    res.json({
+      response: agentResponse,
+    });
+    
+  } catch (error: any) {
+    console.error("❌ Agent chat error:", error);
+    console.error("Error stack:", error.stack);
+    res.status(500).json({
+      error: "agent_chat_failed",
+      message: error.message || "Failed to process chat message",
+    });
+  }
+});
+
+// Health check endpoint
+app.get("/health", (req: Request, res: Response) => {
+  res.json({ status: "ok", service: "x402-gateway" });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 X402 Gateway running on port ${PORT}`);
+  console.log(`📍 Protected endpoint: GET /api/agent/run`);
+  console.log(`🔗 Facilitator: ${ENV.FACILITATOR_URL}`);
+  console.log(`💰 Seller Wallet: ${ENV.SELLER_WALLET}`);
+  console.log(`💵 USDC.e Contract: ${getUSDCEAddress()}`);
+  console.log(`⛓️  Network: ${ENV.NETWORK}`);
+});
+
