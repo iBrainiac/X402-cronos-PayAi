@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import axios from 'axios';
+import { setCORSHeaders, handleOPTIONS } from '../utils/cors';
 
 const ENV = {
   NETWORK: process.env.NETWORK || "cronos-testnet",
@@ -95,13 +96,15 @@ export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ) {
-  // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-PAYMENT');
+  // Set CORS headers
+  setCORSHeaders(res, {
+    methods: 'GET, POST, OPTIONS',
+    headers: 'Content-Type, X-PAYMENT',
+  });
 
+  // Handle preflight OPTIONS request
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    return handleOPTIONS(res);
   }
 
   if (req.method !== 'GET') {
