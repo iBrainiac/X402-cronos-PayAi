@@ -102,6 +102,8 @@ app.get("/api/agent/run", async (req: Request, res: Response) => {
 
   // Step 4: Access Granted - Execute Crypto Price Feed Agent
   try {
+    console.log("🚀 Executing agent service...");
+    
     // Fetch crypto prices from CoinGecko (free, no API key required)
     const symbols = req.query.symbols as string | undefined;
     const coins = symbols ? symbols.split(',').map(s => s.trim().toLowerCase()) : ['bitcoin', 'ethereum'];
@@ -109,25 +111,55 @@ app.get("/api/agent/run", async (req: Request, res: Response) => {
     // Limit to 5 coins max for simplicity
     const limitedCoins = coins.slice(0, 5).join(',');
     
-    const response = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${limitedCoins}&vs_currencies=usd&include_24hr_change=true`
-    );
+    console.log(`📊 Fetching prices for: ${limitedCoins}`);
+    
+    const coingeckoUrl = `https://api.coingecko.com/api/v3/simple/price?ids=${limitedCoins}&vs_currencies=usd&include_24hr_change=true`;
+    
+    const response = await fetch(coingeckoUrl, {
+      headers: {
+        'Accept': 'application/json',
+      },
+      signal: AbortSignal.timeout(10000), // 10 second timeout
+    });
+    
+    console.log(`📡 CoinGecko response status: ${response.status}`);
     
     if (!response.ok) {
-      throw new Error('Failed to fetch prices');
+      const errorText = await response.text();
+      console.error(`❌ CoinGecko API error: ${response.status} - ${errorText}`);
+      throw new Error(`CoinGecko API error: ${response.status}`);
     }
     
     const priceData = await response.json() as Record<string, { usd: number; usd_24h_change?: number }>;
     
+    if (!priceData || Object.keys(priceData).length === 0) {
+      console.warn("⚠️ No price data returned from CoinGecko");
+      throw new Error("No price data available");
+    }
+    
+    console.log(`✅ Received price data for ${Object.keys(priceData).length} coins`);
+    
     // Format the response
-    const formattedPrices = Object.entries(priceData).map(([id, data]) => ({
-      symbol: id.charAt(0).toUpperCase() + id.slice(1),
-      price: data.usd,
-      change24h: data.usd_24h_change ? data.usd_24h_change.toFixed(2) : null,
-    }));
+    const formattedPrices = Object.entries(priceData).map(([id, data]) => {
+      if (!data || typeof data.usd !== 'number') {
+        console.warn(`⚠️ Invalid data for ${id}:`, data);
+        return null;
+      }
+      return {
+        symbol: id.charAt(0).toUpperCase() + id.slice(1),
+        price: data.usd,
+        change24h: data.usd_24h_change !== undefined ? data.usd_24h_change.toFixed(2) : null,
+      };
+    }).filter(Boolean);
+    
+    if (formattedPrices.length === 0) {
+      throw new Error("No valid price data to return");
+    }
+    
+    console.log(`✅ Formatted ${formattedPrices.length} prices`);
     
     // Return protected resource with payment details (per X402 spec)
-    res.status(200).json({
+    const responseData = {
       data: {
         prices: formattedPrices,
         timestamp: new Date().toISOString(),
@@ -141,11 +173,34 @@ app.get("/api/agent/run", async (req: Request, res: Response) => {
         blockNumber: settleResult.blockNumber,
         timestamp: settleResult.timestamp,
       },
-    });
+    };
+    
+    console.log("✅ Agent execution successful");
+    res.status(200).json(responseData);
   } catch (error: any) {
-    res.status(500).json({
-      error: "agent_execution_failed",
-      message: error.message || "Failed to fetch crypto prices",
+    console.error("❌ Agent execution error:", error);
+    console.error("Error details:", {
+      message: error.message,
+      name: error.name,
+      stack: error.stack?.substring(0, 200),
+    });
+    
+    // Still return success with error message in data (payment was successful)
+    res.status(200).json({
+      data: {
+        error: "agent_execution_failed",
+        message: error.message || "Failed to fetch crypto prices",
+        timestamp: new Date().toISOString(),
+        requestId: `req_${Date.now()}`,
+      },
+      payment: {
+        txHash: settleResult.txHash,
+        from: settleResult.from,
+        to: settleResult.to,
+        value: settleResult.value,
+        blockNumber: settleResult.blockNumber,
+        timestamp: settleResult.timestamp,
+      },
     });
   }
 });
