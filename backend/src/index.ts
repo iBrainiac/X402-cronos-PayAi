@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from "express";
 import { verifyPaymentHeader, settlePayment } from "./lib/facilitator";
 import { ENV } from "./config/env";
 import { SERVICES } from "./config/services";
+import { provider } from "./lib/provider";
 
 const app = express();
 app.use(express.json());
