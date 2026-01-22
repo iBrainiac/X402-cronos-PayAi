@@ -4,7 +4,9 @@
   import { CONFIG } from './config/app.js';
   import { generatePaymentHeader } from './lib/x402Payment.js';
   import AgentInterface from './components/AgentInterface.svelte';
+  import LandingPage from './components/LandingPage.svelte';
 
+  let showLanding = true;
   let wallet = null;
   let account = null;
   let currentChainId = null;
@@ -12,6 +14,10 @@
   let error = null;
   let result = null;
   let paymentInfo = null;
+
+  function handleGetStarted() {
+    showLanding = false;
+  }
 
   // Check if wallet is already connected and verify network
   onMount(async () => {
@@ -239,6 +245,9 @@
   }
 </script>
 
+{#if showLanding}
+  <LandingPage on:get-started={handleGetStarted} />
+{:else}
 <div class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-4">
   <div class="w-full {result && status === 'success' ? 'max-w-4xl' : 'max-w-md'}" style="min-height: {result && status === 'success' ? '600px' : 'auto'}">
     <!-- Header -->
@@ -377,4 +386,5 @@
 
   </div>
 </div>
+{/if}
 
