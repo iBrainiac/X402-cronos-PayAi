@@ -1,8 +1,8 @@
+import "dotenv/config";
 import express, { Request, Response, NextFunction } from "express";
 import { verifyPaymentHeader, settlePayment } from "./lib/facilitator";
 import { ENV } from "./config/env";
 import { SERVICES } from "./config/services";
-import { provider } from "./lib/provider";
 
 const app = express();
 app.use(express.json());
@@ -10,7 +10,7 @@ app.use(express.json());
 // CORS middleware for frontend
 // Allow specific origins for production, all for development
 const allowedOrigins = [
-  process.env.FRONTEND_URL || 'https://cronos-payai-facilitator.vercel.app','http://localhost:5173',
+  process.env.FRONTEND_URL || 'https://cronos-payai-facilitator.vercel.app',
   'http://localhost:5173', // Local dev
   'http://localhost:3000',  // Local dev alternative
 ];
@@ -18,16 +18,24 @@ const allowedOrigins = [
 app.use((req: Request, res: Response, next: NextFunction) => {
   const origin = req.headers.origin;
   
-  // Allow requests from allowed origins or all in development
-  if (origin && (allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production')) {
+  // Allow requests from allowed origins
+  if (origin && allowedOrigins.includes(origin)) {
     res.header("Access-Control-Allow-Origin", origin);
-  } else if (!origin || process.env.NODE_ENV !== 'production') {
+  } else if (process.env.NODE_ENV !== 'production') {
     // Allow all origins in development
+    res.header("Access-Control-Allow-Origin", "*");
+  } else if (process.env.FRONTEND_URL) {
+    // In production, use FRONTEND_URL if set
+    res.header("Access-Control-Allow-Origin", process.env.FRONTEND_URL);
+  } else {
+    // Fallback: allow all (less secure, but works)
     res.header("Access-Control-Allow-Origin", "*");
   }
   
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type, X-PAYMENT");
+  res.header("Access-Control-Allow-Headers", "Content-Type, X-PAYMENT, Authorization");
+  res.header("Access-Control-Max-Age", "86400");
+  
   if (req.method === "OPTIONS") {
     return res.sendStatus(200);
   }
