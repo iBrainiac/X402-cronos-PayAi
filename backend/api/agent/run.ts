@@ -25,16 +25,19 @@ const getUSDCEAddress = () =>
     ? ENV.USDCE_CONTRACT_MAINNET
     : ENV.USDCE_CONTRACT_TESTNET;
 
-function applyCors(req: VercelRequest, res: VercelResponse) {
+function applyCors(res: VercelResponse) {
   const origin = process.env.FRONTEND_URL || '*';
-
+  
+  // Set CORS headers - MUST be set before any response
   res.setHeader('Access-Control-Allow-Origin', origin);
-  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'Content-Type, X-Payment, Authorization'
-  );
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-PAYMENT, Authorization');
   res.setHeader('Access-Control-Max-Age', '86400');
+  
+  // For credentials (if needed in future)
+  if (origin !== '*') {
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
 }
 
 /* -------------------- HANDLER -------------------- */
@@ -43,12 +46,13 @@ export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ) {
-  // ✅ ALWAYS apply CORS first
-  applyCors(req, res);
+  // CRITICAL: Set CORS headers FIRST, before ANY logic
+  applyCors(res);
 
-  // ✅ CORRECT preflight handling for Vercel
+  // Handle OPTIONS preflight request - MUST return early
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    res.status(200).end();
+    return;
   }
   
   if (req.method !== 'GET') {
