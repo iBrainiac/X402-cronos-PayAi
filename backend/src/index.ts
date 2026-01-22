@@ -9,7 +9,7 @@ app.use(express.json());
 // CORS middleware for frontend
 // Allow specific origins for production, all for development
 const allowedOrigins = [
-  process.env.FRONTEND_URL || 'http://localhost:5173',
+  process.env.FRONTEND_URL || 'https://cronos-payai-facilitator.vercel.app','http://localhost:5173',
   'http://localhost:5173', // Local dev
   'http://localhost:3000',  // Local dev alternative
 ];
