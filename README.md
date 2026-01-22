@@ -9,7 +9,8 @@ A pay-per-request AI agent gateway on Cronos that uses the X402 payment protocol
 The app allows users (or AI agents) to access a protected service (e.g. an AI agent, API endpoint, or on-chain service) only after completing an on-chain USDC payment, enforced using the HTTP 402 Payment Required pattern.
 
 Instead of subscriptions or off-chain billing, each request is settled trustlessly on-chain, and access is unlocked automatically once the payment is verified.
-
+Sample onchain transaction 
+https://explorer.cronos.org/testnet/tx/0x2252821077223c1fcba6961247bd878d776622688a2ece823593d309adaa66b2
 🧠 Core Concept
 
 HTTP 402 is used as a native on-chain paywall
