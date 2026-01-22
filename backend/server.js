@@ -1,5 +1,5 @@
 import express from "express";
-import { verifyPayment } from "./verifyPayment.js";
+import { verifyPayment } from "../backend/verifyPayment.js";
 
 
 const app = express();
