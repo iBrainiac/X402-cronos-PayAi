@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "mkdir -p public && echo 'Serverless functions - no build needed' > public/.vercel-build",
-    "start": "node dist/index.js",
+    "start": "tsx src/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
