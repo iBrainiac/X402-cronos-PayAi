@@ -1,0 +1,16 @@
+{
+  "name": "cronos-x402-gateway",
+  "version": "1.0.0",
+  "description": "Cronos X402 Gateway - Pay-per-request AI agent access",
+  "scripts": {
+    "vercel-build": "cd frontend && npm install && npm run build"
+  },
+  "dependencies": {
+    "axios": "^1.13.2"
+  },
+  "devDependencies": {
+    "@vercel/node": "^3.0.0",
+    "@types/node": "^20.10.5"
+  }
+}
+

@@ -56,3 +56,5 @@ test/
 .env.test.local
 .env.production.local
 node_modules
+VERCEL_QUICKSTART.md 
+VERCEL_DEPLOYMENT.md
