@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import axios from 'axios';
-import { setCORSHeaders, handleOPTIONS } from '../utils/cors';
+
+/* -------------------- ENV -------------------- */
 
 const ENV = {
   NETWORK: process.env.NETWORK || "cronos-testnet",
@@ -17,120 +18,44 @@ const SERVICE = {
   maxTimeoutSeconds: 300,
 };
 
-const getUSDCEAddress = () => {
-  return ENV.NETWORK === "cronos" 
-    ? ENV.USDCE_CONTRACT_MAINNET 
+/* -------------------- HELPERS -------------------- */
+
+const getUSDCEAddress = () =>
+  ENV.NETWORK === "cronos"
+    ? ENV.USDCE_CONTRACT_MAINNET
     : ENV.USDCE_CONTRACT_TESTNET;
-};
 
-interface PaymentRequirements {
-  scheme: "exact";
-  network: "cronos-testnet" | "cronos";
-  payTo: string;
-  asset: string;
-  description?: string;
-  mimeType?: string;
-  maxAmountRequired: string;
-  maxTimeoutSeconds: number;
+function applyCors(req: VercelRequest, res: VercelResponse) {
+  const origin = process.env.FRONTEND_URL || '*';
+
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, X-Payment, Authorization'
+  );
+  res.setHeader('Access-Control-Max-Age', '86400');
 }
 
-async function verifyPaymentHeader(
-  paymentHeader: string,
-  paymentRequirements: PaymentRequirements
-): Promise<{ isValid: boolean; invalidReason?: string }> {
-  try {
-    const response = await axios.post(`${ENV.FACILITATOR_URL}/verify`, {
-      x402Version: 1,
-      paymentHeader,
-      paymentRequirements,
-    }, {
-      headers: {
-        "Content-Type": "application/json",
-        "X402-Version": "1",
-      },
-    });
-    return response.data;
-  } catch (error: any) {
-    return { 
-      isValid: false, 
-      invalidReason: error.response?.data?.invalidReason || error.message 
-    };
-  }
-}
-
-async function settlePayment(
-  paymentHeader: string,
-  paymentRequirements: PaymentRequirements
-): Promise<{
-  event: "payment.settled" | "payment.failed";
-  txHash?: string;
-  from?: string;
-  to?: string;
-  value?: string;
-  blockNumber?: number;
-  timestamp?: string;
-  error?: string;
-}> {
-  try {
-    const response = await axios.post(`${ENV.FACILITATOR_URL}/settle`, {
-      x402Version: 1,
-      paymentHeader,
-      paymentRequirements,
-    }, {
-      headers: {
-        "Content-Type": "application/json",
-        "X402-Version": "1",
-      },
-    });
-    return response.data;
-  } catch (error: any) {
-    return { 
-      event: "payment.failed", 
-      timestamp: new Date().toISOString(),
-      error: error.response?.data?.error || error.message 
-    };
-  }
-}
+/* -------------------- HANDLER -------------------- */
 
 export default async function handler(
   req: VercelRequest,
   res: VercelResponse
 ) {
-  // Set CORS headers
-  setCORSHeaders(res, {
-    methods: 'GET, POST, OPTIONS',
-    headers: 'Content-Type, X-PAYMENT',
-  });
+  // ✅ ALWAYS apply CORS first
+  applyCors(req, res);
 
-  // Handle preflight OPTIONS request
+  // ✅ CORRECT preflight handling for Vercel
   if (req.method === 'OPTIONS') {
-    return handleOPTIONS(res);
+    return res.status(200).end();
   }
-
+  
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const paymentHeader = req.headers["x-payment"] as string | undefined;
-
-  if (!paymentHeader) {
-    const paymentRequirements = {
-      scheme: "exact" as const,
-      network: ENV.NETWORK as "cronos-testnet" | "cronos",
-      payTo: ENV.SELLER_WALLET,
-      asset: getUSDCEAddress(),
-      description: SERVICE.description,
-      mimeType: SERVICE.mimeType,
-      maxAmountRequired: SERVICE.priceUSDC,
-      maxTimeoutSeconds: SERVICE.maxTimeoutSeconds,
-    };
-
-    return res.status(402).json({
-      error: "Payment Required",
-      x402Version: 1,
-      paymentRequirements,
-    });
-  }
+  const paymentHeader = req.headers['x-payment'] as string | undefined;
 
   const paymentRequirements = {
     scheme: "exact" as const,
@@ -143,8 +68,21 @@ export default async function handler(
     maxTimeoutSeconds: SERVICE.maxTimeoutSeconds,
   };
 
-  const verifyResult = await verifyPaymentHeader(paymentHeader, paymentRequirements);
-  
+  // -------------------- x402 FLOW --------------------
+
+  if (!paymentHeader) {
+    return res.status(402).json({
+      error: "Payment Required",
+      x402Version: 1,
+      paymentRequirements,
+    });
+  }
+
+  const verifyResult = await verifyPaymentHeader(
+    paymentHeader,
+    paymentRequirements
+  );
+
   if (!verifyResult.isValid) {
     return res.status(402).json({
       error: "Invalid payment",
@@ -152,8 +90,11 @@ export default async function handler(
     });
   }
 
-  const settleResult = await settlePayment(paymentHeader, paymentRequirements);
-  
+  const settleResult = await settlePayment(
+    paymentHeader,
+    paymentRequirements
+  );
+
   if (settleResult.event !== "payment.settled") {
     return res.status(402).json({
       error: "Payment settlement failed",
@@ -161,71 +102,51 @@ export default async function handler(
     });
   }
 
+  // -------------------- AGENT EXECUTION --------------------
+
   try {
     const symbols = req.query.symbols as string | undefined;
-    const coins = symbols ? symbols.split(',').map(s => s.trim().toLowerCase()) : ['bitcoin', 'ethereum'];
-    const limitedCoins = coins.slice(0, 5).join(',');
-    
+    const coins = symbols
+      ? symbols.split(',').map(s => s.trim().toLowerCase())
+      : ['bitcoin', 'ethereum'];
+
     const response = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${limitedCoins}&vs_currencies=usd&include_24hr_change=true`,
-      { signal: AbortSignal.timeout(10000) }
+      `https://api.coingecko.com/api/v3/simple/price?ids=${coins
+        .slice(0, 5)
+        .join(',')}&vs_currencies=usd&include_24hr_change=true`
     );
-    
-    if (!response.ok) {
-      throw new Error(`CoinGecko API error: ${response.status}`);
-    }
-    
-    const priceData = await response.json() as Record<string, { usd: number; usd_24h_change?: number }>;
-    
-    if (!priceData || Object.keys(priceData).length === 0) {
-      throw new Error("No price data available");
-    }
-    
-    const formattedPrices = Object.entries(priceData).map(([id, data]) => {
-      if (!data || typeof data.usd !== 'number') return null;
-      return {
-        symbol: id.charAt(0).toUpperCase() + id.slice(1),
-        price: data.usd,
-        change24h: data.usd_24h_change !== undefined ? data.usd_24h_change.toFixed(2) : null,
-      };
-    }).filter(Boolean);
-    
-    if (formattedPrices.length === 0) {
-      throw new Error("No valid price data to return");
-    }
-    
-    res.status(200).json({
-      data: {
-        prices: formattedPrices,
-        timestamp: new Date().toISOString(),
-        requestId: `req_${Date.now()}`,
-      },
-      payment: {
-        txHash: settleResult.txHash,
-        from: settleResult.from,
-        to: settleResult.to,
-        value: settleResult.value,
-        blockNumber: settleResult.blockNumber,
-        timestamp: settleResult.timestamp,
-      },
+
+    const priceData = await response.json();
+
+    return res.status(200).json({
+      data: priceData,
+      payment: settleResult,
     });
-  } catch (error: any) {
-    res.status(200).json({
-      data: {
-        error: "agent_execution_failed",
-        message: error.message || "Failed to fetch crypto prices",
-        timestamp: new Date().toISOString(),
-        requestId: `req_${Date.now()}`,
-      },
-      payment: {
-        txHash: settleResult.txHash,
-        from: settleResult.from,
-        to: settleResult.to,
-        value: settleResult.value,
-        blockNumber: settleResult.blockNumber,
-        timestamp: settleResult.timestamp,
-      },
+  } catch (err: any) {
+    return res.status(200).json({
+      error: "agent_execution_failed",
+      message: err.message,
+      payment: settleResult,
     });
   }
 }
 
+/* -------------------- FACILITATOR CALLS -------------------- */
+
+async function verifyPaymentHeader(paymentHeader: string, paymentRequirements: any) {
+  const response = await axios.post(
+    `${ENV.FACILITATOR_URL}/verify`,
+    { x402Version: 1, paymentHeader, paymentRequirements },
+    { headers: { "Content-Type": "application/json", "X402-Version": "1" } }
+  );
+  return response.data;
+}
+
+async function settlePayment(paymentHeader: string, paymentRequirements: any) {
+  const response = await axios.post(
+    `${ENV.FACILITATOR_URL}/settle`,
+    { x402Version: 1, paymentHeader, paymentRequirements },
+    { headers: { "Content-Type": "application/json", "X402-Version": "1" } }
+  );
+  return response.data;
+}

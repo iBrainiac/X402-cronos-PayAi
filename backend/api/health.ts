@@ -1,18 +1,20 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { setCORSHeaders, handleOPTIONS } from './utils/cors';
 
 export default function handler(
   req: VercelRequest,
   res: VercelResponse
 ) {
-  // Set CORS headers
-  setCORSHeaders(res, {
-    methods: 'GET, OPTIONS',
-  });
+  // STEP 1: Set CORS headers FIRST (like Express middleware)
+  const allowedOrigin = process.env.FRONTEND_URL || '*';
+  res.setHeader('Access-Control-Allow-Origin', allowedOrigin);
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Max-Age', '86400');
 
-  // Handle preflight OPTIONS request
+  // STEP 2: Handle OPTIONS preflight FIRST (before any other logic)
   if (req.method === 'OPTIONS') {
-    return handleOPTIONS(res);
+    res.status(200).end();
+    return;
   }
 
   res.status(200).json({ 
