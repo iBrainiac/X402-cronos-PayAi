@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
+    "build": "mkdir -p public && echo 'Serverless functions - no build needed' > public/.vercel-build",
     "start": "node dist/index.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -23,6 +23,7 @@
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^20.10.5",
+    "@vercel/node": "^3.2.29",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3"
   }

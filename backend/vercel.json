@@ -1,0 +1,6 @@
+{
+  "version": 2,
+  "buildCommand": "mkdir -p public && echo 'Serverless functions' > public/.vercel-build",
+  "outputDirectory": "public"
+}
+

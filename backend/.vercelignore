@@ -1,0 +1,8 @@
+node_modules
+dist
+src
+lib
+*.log
+.env
+.env.local
+

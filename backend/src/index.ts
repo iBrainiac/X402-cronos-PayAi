@@ -7,8 +7,24 @@ const app = express();
 app.use(express.json());
 
 // CORS middleware for frontend
+// Allow specific origins for production, all for development
+const allowedOrigins = [
+  process.env.FRONTEND_URL || 'http://localhost:5173',
+  'http://localhost:5173', // Local dev
+  'http://localhost:3000',  // Local dev alternative
+];
+
 app.use((req: Request, res: Response, next: NextFunction) => {
-  res.header("Access-Control-Allow-Origin", "*");
+  const origin = req.headers.origin;
+  
+  // Allow requests from allowed origins or all in development
+  if (origin && (allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production')) {
+    res.header("Access-Control-Allow-Origin", origin);
+  } else if (!origin || process.env.NODE_ENV !== 'production') {
+    // Allow all origins in development
+    res.header("Access-Control-Allow-Origin", "*");
+  }
+  
   res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.header("Access-Control-Allow-Headers", "Content-Type, X-PAYMENT");
   if (req.method === "OPTIONS") {

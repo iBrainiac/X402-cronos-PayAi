@@ -8,3 +8,4 @@ dist
 .env*
 AGENT_API_KEY.txt
 AGENT_INTERGRATION.md
+.vercel
